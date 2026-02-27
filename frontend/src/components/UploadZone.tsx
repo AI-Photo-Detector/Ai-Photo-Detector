@@ -95,7 +95,7 @@ export function UploadZone({ onUpload, isAnalyzing }: UploadZoneProps) {
           </label>
           
           <p className="text-xs text-gray-500">
-            Supports: JPG, PNG, WEBP, GIF (Max 10MB per file)
+            Supports: JPG, PNG, WEBP (Max 10MB per file)
           </p>
         </div>
       </div>

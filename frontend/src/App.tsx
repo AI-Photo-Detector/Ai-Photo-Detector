@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Upload, FileText, Download, Info, CheckCircle, AlertCircle } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Card } from "./components/ui/card";
@@ -9,6 +9,7 @@ import { UploadZone } from "./components/UploadZone";
 import { ResultsDashboard } from "./components/ResultsDashboard";
 import { HowToGuide } from "./components/HowToGuide";
 import { exportToPDF } from "./utils/pdfExport";
+import { detectImage } from "./api/detector";
 
 export interface AnalysisResult {
   id: string;
@@ -29,58 +30,63 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<"upload" | "results" | "guide">("upload");
   const [currentResult, setCurrentResult] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [lastUploadedFile, setLastUploadedFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (currentResult?.imageUrl) {
+        URL.revokeObjectURL(currentResult.imageUrl);
+      }
+    };
+  }, [currentResult]);
 
   const handleFileUpload = async (files: File[]) => {
-    setIsAnalyzing(true);
-    
-    // Simulate AI analysis
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Only analyze the first file
+    if (!files.length) {
+      return;
+    }
+
     const file = files[0];
-    const isAI = Math.random() > 0.5;
-    const confidence = Math.random() * 40 + 60; // 60-100%
-    
-    const result: AnalysisResult = {
-      id: Date.now().toString(),
-      fileName: file.name,
-      fileSize: file.size,
-      uploadDate: new Date(),
-      isAIGenerated: isAI,
-      confidence: confidence,
-      indicators: [
-        {
-          label: "Pixel Consistency",
-          value: Math.random() * 100,
-          status: Math.random() > 0.5 ? "pass" : "warning"
-        },
-        {
-          label: "Noise Patterns",
-          value: Math.random() * 100,
-          status: Math.random() > 0.5 ? "pass" : "fail"
-        },
-        {
-          label: "Edge Detection",
-          value: Math.random() * 100,
-          status: "pass"
-        },
-        {
-          label: "Color Distribution",
-          value: Math.random() * 100,
-          status: Math.random() > 0.5 ? "warning" : "pass"
-        },
-        {
-          label: "Frequency Analysis",
-          value: Math.random() * 100,
-          status: "pass"
+    setLastUploadedFile(file);
+    setIsAnalyzing(true);
+    setUploadError(null);
+
+    try {
+      const response = await detectImage(file);
+      const previewUrl = URL.createObjectURL(file);
+
+      setCurrentResult((previous) => {
+        if (previous?.imageUrl) {
+          URL.revokeObjectURL(previous.imageUrl);
         }
-      ],
-      imageUrl: URL.createObjectURL(file)
-    };
-    
-    setCurrentResult(result);
-    setIsAnalyzing(false);
-    setCurrentTab("results");
+
+        return {
+          id: response.metadata?.requestId ?? Date.now().toString(),
+          fileName: file.name,
+          fileSize: file.size,
+          uploadDate: new Date(),
+          isAIGenerated: response.isAIGenerated,
+          confidence: response.confidence,
+          indicators: response.indicators,
+          imageUrl: previewUrl,
+        };
+      });
+
+      setCurrentTab("results");
+    } catch (error) {
+      const fallback = "Analysis failed. Make sure backend is running and try again.";
+      const message = error instanceof Error ? error.message : fallback;
+      setUploadError(message || fallback);
+      setCurrentTab("upload");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleRetry = () => {
+    if (lastUploadedFile) {
+      void handleFileUpload([lastUploadedFile]);
+    }
   };
 
   const handleExportPDF = () => {
@@ -91,7 +97,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#b690e6] via-[#a280cc] to-[#8d70b3]">
-      {/* Header */}
       <header className="bg-white/80 backdrop-blur-md border-b border-[#8d70b3]/30 sticky top-0 z-10 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
@@ -104,20 +109,13 @@ export default function App() {
                 <p className="text-sm text-[#655080]">Detect AI-generated images with confidence</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              {currentResult && (
-                <Badge variant="secondary">
-                  1 Analysis
-                </Badge>
-              )}
-            </div>
+            <div className="flex items-center gap-2">{currentResult && <Badge variant="secondary">1 Analysis</Badge>}</div>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Tabs value={currentTab} onValueChange={(v) => setCurrentTab(v as any)} className="space-y-6">
+        <Tabs value={currentTab} onValueChange={(v) => setCurrentTab(v as "upload" | "results" | "guide")} className="space-y-6">
           <TabsList className="grid w-full max-w-md mx-auto grid-cols-3 bg-white/70 backdrop-blur-sm shadow-sm">
             <TabsTrigger value="upload" className="flex items-center gap-2">
               <Upload className="w-4 h-4" />
@@ -137,13 +135,11 @@ export default function App() {
             <Card className="p-8 shadow-lg border-[#8d70b3]/30 bg-white/70 backdrop-blur-sm">
               <div className="text-center mb-6">
                 <h2 className="text-gray-900 mb-2">Upload Photos for Analysis</h2>
-                <p className="text-gray-600">
-                  Upload one or more images to detect if they were generated by AI
-                </p>
+                <p className="text-gray-600">Upload one or more images to detect if they were generated by AI</p>
               </div>
-              
+
               <UploadZone onUpload={handleFileUpload} isAnalyzing={isAnalyzing} />
-              
+
               {isAnalyzing && (
                 <div className="mt-6 space-y-2">
                   <div className="flex items-center justify-between text-sm">
@@ -153,6 +149,17 @@ export default function App() {
                   <Progress value={66} className="h-2" />
                 </div>
               )}
+
+              {uploadError && (
+                <div className="mt-6 rounded-lg border border-rose-200 bg-rose-50 p-4 text-left">
+                  <p className="text-sm text-rose-700">{uploadError}</p>
+                  <div className="mt-3">
+                    <Button type="button" variant="outline" onClick={handleRetry} disabled={isAnalyzing || !lastUploadedFile}>
+                      Retry last upload
+                    </Button>
+                  </div>
+                </div>
+              )}
             </Card>
 
             {currentResult && (
@@ -160,15 +167,9 @@ export default function App() {
                 <div className="flex items-start gap-3">
                   <CheckCircle className="w-5 h-5 text-[#655080] mt-0.5" />
                   <div>
-                    <p className="text-gray-900">
-                      Analysis complete
-                    </p>
-                    <Button
-                      variant="link"
-                      className="p-0 h-auto text-[#655080]"
-                      onClick={() => setCurrentTab("results")}
-                    >
-                      View results →
+                    <p className="text-gray-900">Analysis complete</p>
+                    <Button variant="link" className="p-0 h-auto text-[#655080]" onClick={() => setCurrentTab("results")}>
+                      View results -&gt;
                     </Button>
                   </div>
                 </div>
@@ -182,9 +183,7 @@ export default function App() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-gray-900">Analysis Results</h2>
-                    <p className="text-gray-600">
-                      Detailed detection report for your uploaded image
-                    </p>
+                    <p className="text-gray-600">Detailed detection report for your uploaded image</p>
                   </div>
                   <Button onClick={handleExportPDF} className="gap-2 bg-gradient-to-r from-[#8d70b3] to-[#655080] hover:from-[#796099] hover:to-[#514066] shadow-md">
                     <Download className="w-4 h-4" />
@@ -192,22 +191,14 @@ export default function App() {
                   </Button>
                 </div>
 
-                <ResultsDashboard
-                  results={[currentResult]}
-                  selectedResult={currentResult}
-                  onSelectResult={() => {}}
-                />
+                <ResultsDashboard results={[currentResult]} selectedResult={currentResult} onSelectResult={() => {}} />
               </div>
             ) : (
               <Card className="p-12 text-center shadow-lg bg-white/70 backdrop-blur-sm">
                 <AlertCircle className="w-12 h-12 text-[#8d70b3] mx-auto mb-4" />
                 <h3 className="text-gray-900 mb-2">No Results Yet</h3>
-                <p className="text-gray-600 mb-4">
-                  Upload images to see detection results
-                </p>
-                <Button onClick={() => setCurrentTab("upload")}>
-                  Go to Upload
-                </Button>
+                <p className="text-gray-600 mb-4">Upload images to see detection results</p>
+                <Button onClick={() => setCurrentTab("upload")}>Go to Upload</Button>
               </Card>
             )}
           </TabsContent>

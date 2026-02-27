@@ -1,52 +1,48 @@
-# Import FastAPI framework
-from fastapi import FastAPI
+import logging
+import os
 
-# Middleware that allows frontend (React) to talk to backend
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import API routes defined in routes.py
-from routes import router
+from backend.routes import router as api_router
 
-
-# Create FastAPI app instance
-app = FastAPI(
-    title="AI Photo Detector API",   # shown in Swagger docs
-    version="0.1.0"
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
+app = FastAPI(
+    title="AI Photo Detector API",
+    version="0.1.0",
+)
 
-# -------------------------------
-# CORS CONFIGURATION
-# -------------------------------
-# This is VERY important.
-# Without this, the React frontend cannot call the backend.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # allow all origins for now (safe for dev)
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["*"],      # allow GET, POST, etc.
-    allow_headers=["*"],      # allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-
-# -------------------------------
-# REGISTER ROUTES
-# -------------------------------
-# This connects the endpoints in routes.py to the main app
-app.include_router(router)
+app.include_router(api_router)
 
 
-# -------------------------------
-# BASIC ENDPOINTS
-# -------------------------------
-
-# Root endpoint → just confirms backend is running
-@app.get("/")
-def root():
-    return {"message": "AI Photo Detector backend running"}
-
-
-# Health endpoint → useful for testing / deployment checks
 @app.get("/health")
-def health():
+def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    app_env = os.getenv("APP_ENV", "development")
+    logger.info(
+        "Starting API in env=%s loaded_modules=%s",
+        app_env,
+        [
+            "backend.routes",
+            "backend.detector.preprocess",
+            "backend.detector.predict",
+            "backend.detector.postprocess",
+        ],
+    )
