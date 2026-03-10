@@ -42,7 +42,8 @@ export default function App() {
   }, [currentResult]);
 
   const handleFileUpload = async (files: File[]) => {
-    if (!files.length) {
+    // Prevent spamming uploads while a request is already running
+    if (!files.length || isAnalyzing) {
       return;
     }
 
@@ -73,10 +74,28 @@ export default function App() {
       });
 
       setCurrentTab("results");
-    } catch (error) {
-      const fallback = "Analysis failed. Make sure backend is running and try again.";
-      const message = error instanceof Error ? error.message : fallback;
-      setUploadError(message || fallback);
+    } catch (error: any) {
+      let message = "Analysis failed. Please try again.";
+
+      // Many API clients attach status here (axios-style), but this is safe even if undefined
+      const status = error?.response?.status ?? error?.status;
+
+      if (status === 422) {
+        message = "Invalid file. Please upload a JPG, PNG, or WEBP image under 10MB.";
+      } else if (status === 415) {
+        message = "Unsupported file type. Please upload a JPG, PNG, or WEBP image.";
+      } else if (
+        typeof error?.message === "string" &&
+        (error.message.includes("Failed to fetch") ||
+          error.message.includes("NetworkError") ||
+          error.message.includes("ECONNREFUSED"))
+      ) {
+        message = "Cannot connect to backend. Make sure the server is running.";
+      } else if (error instanceof Error && error.message) {
+        message = error.message;
+      }
+
+      setUploadError(message);
       setCurrentTab("upload");
     } finally {
       setIsAnalyzing(false);
