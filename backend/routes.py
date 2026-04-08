@@ -54,26 +54,36 @@ def _classification_threshold(*, used_fallback: bool) -> float:
     except ValueError as exc:
         raise ValueError(f"{env_key} must be a number.") from exc
 
-
-@router.get("/health")
-def api_healthcheck() -> dict[str, str]:
-    return {"status": "ok"}
-
-
 @router.post("/detect", response_model=DetectionResponse)
 async def detect_image(file: UploadFile | None = File(default=None)):
     request_id = str(uuid.uuid4())
     start = time.perf_counter()
 
+   
     if file is None:
         elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
-        logger.warning("detect_failed request_id=%s reason=missing_file elapsed_ms=%s", request_id, elapsed_ms)
+        logger.warning(
+            "detect_failed request_id=%s reason=missing_file elapsed_ms=%s",
+            request_id,
+            elapsed_ms,
+        )
         return _error_payload(
             status_code=status.HTTP_400_BAD_REQUEST,
             error_code="MISSING_FILE",
             message="No file was uploaded.",
             details={"requestId": request_id},
         )
+
+    if not file.filename:
+        return _error_payload(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_FILE",
+            message="File must have a valid name.",
+            details={"requestId": request_id},
+        )
+
+
+
 
     mime_type = file.content_type or ""
     if mime_type not in ACCEPTED_IMAGE_MIME_TYPES:
