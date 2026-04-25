@@ -61,6 +61,84 @@ function safeFileBaseName(fileName: string) {
   return fileName.replace(/\.[^/.]+$/, "").replace(/[^\w-]+/g, "_") || "image";
 }
 
+function writeOfficialReportLine(pdf: jsPDF, line: string, yPosition: number, pageWidth: number) {
+  const trimmed = line.trim();
+  const contentWidth = pageWidth - PAGE_MARGIN * 2;
+
+  if (trimmed === "") {
+    return yPosition + 4;
+  }
+
+  yPosition = ensureSpace(pdf, yPosition, 12);
+
+  if (/^=+$/.test(trimmed) || /^-+$/.test(trimmed)) {
+    pdf.setDrawColor(203, 213, 225);
+    pdf.setLineWidth(0.4);
+    pdf.line(PAGE_MARGIN, yPosition - 3, pageWidth - PAGE_MARGIN, yPosition - 3);
+    return yPosition + 3;
+  }
+
+  const isMainTitle = trimmed === "FAKE PHOTO DETECTOR - ANALYSIS REPORT";
+  const isSectionTitle =
+    trimmed === trimmed.toUpperCase() &&
+    trimmed.length <= 40 &&
+    !trimmed.startsWith("-") &&
+    !trimmed.includes(":");
+
+  if (isMainTitle) {
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(18);
+    pdf.setTextColor(31, 41, 55);
+    return writeWrappedText(pdf, trimmed, PAGE_MARGIN, yPosition, contentWidth, 8) + 2;
+  }
+
+  if (isSectionTitle) {
+    yPosition = ensureSpace(pdf, yPosition, 16);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(13);
+    pdf.setTextColor(31, 41, 55);
+    return writeWrappedText(pdf, trimmed, PAGE_MARGIN, yPosition, contentWidth, 7) + 1;
+  }
+
+  if (trimmed.startsWith("Test Name:")) {
+    yPosition = ensureSpace(pdf, yPosition, 18);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(10.5);
+    pdf.setTextColor(31, 41, 55);
+    return writeWrappedText(pdf, trimmed, PAGE_MARGIN, yPosition, contentWidth, 5.5) + 1;
+  }
+
+  pdf.setFont("helvetica", trimmed.startsWith("- ") ? "normal" : "normal");
+  pdf.setFontSize(10);
+  pdf.setTextColor(75, 85, 99);
+  return writeWrappedText(pdf, line, PAGE_MARGIN, yPosition, contentWidth, 5.2) + 1;
+}
+
+function exportOfficialReportPDF(result: AnalysisResult, officialReport: string) {
+  const pdf = new jsPDF();
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  let yPosition = PAGE_MARGIN;
+
+  officialReport.split(/\r?\n/).forEach((line) => {
+    yPosition = writeOfficialReportLine(pdf, line, yPosition, pageWidth);
+  });
+
+  yPosition = ensureSpace(pdf, yPosition + 4, 24);
+  yPosition = sectionTitle(pdf, "Disclaimer", yPosition);
+  pdf.setFontSize(10);
+  pdf.setTextColor(75, 85, 99);
+  writeWrappedText(
+    pdf,
+    "This report is an estimate. Model scores and forensic checks are supporting signals, not proof. Use it alongside source verification, image provenance, and human review.",
+    PAGE_MARGIN,
+    yPosition,
+    pageWidth - PAGE_MARGIN * 2
+  );
+
+  addFooter(pdf);
+  pdf.save(`AI_Detection_Report_${safeFileBaseName(result.fileName)}.pdf`);
+}
+
 function formatProvider(provider?: string | null) {
   if (!provider) return "Unknown";
   if (provider === "bitmind_api") return "BitMind API";
@@ -103,6 +181,11 @@ function writeKeyValue(
 }
 
 export function exportToPDF(result: AnalysisResult) {
+  if (result.officialReport?.trim()) {
+    exportOfficialReportPDF(result, result.officialReport);
+    return;
+  }
+
   const pdf = new jsPDF();
   const pageWidth = pdf.internal.pageSize.getWidth();
   let yPosition = PAGE_MARGIN;
