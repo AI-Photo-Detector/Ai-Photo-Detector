@@ -66,16 +66,16 @@ function writeOfficialReportLine(pdf: jsPDF, line: string, yPosition: number, pa
   const contentWidth = pageWidth - PAGE_MARGIN * 2;
 
   if (trimmed === "") {
-    return yPosition + 4;
+    return yPosition + 3.5;
   }
 
   yPosition = ensureSpace(pdf, yPosition, 12);
 
   if (/^=+$/.test(trimmed) || /^-+$/.test(trimmed)) {
-    pdf.setDrawColor(203, 213, 225);
-    pdf.setLineWidth(0.4);
+    pdf.setDrawColor(148, 163, 184);
+    pdf.setLineWidth(/^=+$/.test(trimmed) ? 0.55 : 0.35);
     pdf.line(PAGE_MARGIN, yPosition - 3, pageWidth - PAGE_MARGIN, yPosition - 3);
-    return yPosition + 3;
+    return yPosition + 2.5;
   }
 
   const isMainTitle = trimmed === "FAKE PHOTO DETECTOR - ANALYSIS REPORT";
@@ -86,40 +86,56 @@ function writeOfficialReportLine(pdf: jsPDF, line: string, yPosition: number, pa
     !trimmed.includes(":");
 
   if (isMainTitle) {
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(18);
-    pdf.setTextColor(31, 41, 55);
-    return writeWrappedText(pdf, trimmed, PAGE_MARGIN, yPosition, contentWidth, 8) + 2;
+    pdf.setFont("times", "bold");
+    pdf.setFontSize(19);
+    pdf.setTextColor(17, 24, 39);
+    return writeWrappedText(pdf, trimmed, PAGE_MARGIN, yPosition, contentWidth, 8.5) + 1.5;
   }
 
   if (isSectionTitle) {
     yPosition = ensureSpace(pdf, yPosition, 16);
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(13);
-    pdf.setTextColor(31, 41, 55);
-    return writeWrappedText(pdf, trimmed, PAGE_MARGIN, yPosition, contentWidth, 7) + 1;
+    pdf.setFont("times", "bold");
+    pdf.setFontSize(13.5);
+    pdf.setTextColor(17, 24, 39);
+    return writeWrappedText(pdf, trimmed, PAGE_MARGIN, yPosition, contentWidth, 7) + 0.5;
   }
 
   if (trimmed.startsWith("Test Name:")) {
     yPosition = ensureSpace(pdf, yPosition, 18);
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(10.5);
-    pdf.setTextColor(31, 41, 55);
+    pdf.setFont("times", "bold");
+    pdf.setFontSize(11);
+    pdf.setTextColor(30, 41, 59);
     return writeWrappedText(pdf, trimmed, PAGE_MARGIN, yPosition, contentWidth, 5.5) + 1;
   }
 
-  pdf.setFont("helvetica", trimmed.startsWith("- ") ? "normal" : "normal");
-  pdf.setFontSize(10);
-  pdf.setTextColor(75, 85, 99);
-  return writeWrappedText(pdf, line, PAGE_MARGIN, yPosition, contentWidth, 5.2) + 1;
+  const isFieldLine = /^[A-Za-z][A-Za-z /]+:/.test(trimmed);
+  const bodyFont = isFieldLine ? "courier" : "times";
+  pdf.setFont(bodyFont, "normal");
+  pdf.setFontSize(isFieldLine ? 9.2 : 10.3);
+  pdf.setTextColor(isFieldLine ? 51 : 55, isFieldLine ? 65 : 65, isFieldLine ? 85 : 81);
+  return writeWrappedText(pdf, line, PAGE_MARGIN, yPosition, contentWidth, isFieldLine ? 4.8 : 5.4) + 0.8;
 }
 
 function exportOfficialReportPDF(result: AnalysisResult, officialReport: string) {
   const pdf = new jsPDF();
   const pageWidth = pdf.internal.pageSize.getWidth();
   let yPosition = PAGE_MARGIN;
+  const reportLines = officialReport.split(/\r?\n/);
 
-  officialReport.split(/\r?\n/).forEach((line) => {
+  pdf.setFillColor(248, 250, 252);
+  pdf.rect(0, 0, pageWidth, 30, "F");
+  pdf.setDrawColor(100, 116, 139);
+  pdf.setLineWidth(0.6);
+  pdf.line(PAGE_MARGIN, 30, pageWidth - PAGE_MARGIN, 30);
+  pdf.setFont("times", "bold");
+  pdf.setFontSize(10);
+  pdf.setTextColor(71, 85, 105);
+  pdf.text("AI PHOTO DETECTOR", PAGE_MARGIN, 13);
+  pdf.setFont("times", "normal");
+  pdf.text("Official Analysis Report", PAGE_MARGIN, 20);
+  yPosition = 40;
+
+  reportLines.forEach((line) => {
     yPosition = writeOfficialReportLine(pdf, line, yPosition, pageWidth);
   });
 
