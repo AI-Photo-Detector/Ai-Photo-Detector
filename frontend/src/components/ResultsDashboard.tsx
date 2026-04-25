@@ -20,20 +20,20 @@ import { normalizeForensicTests } from "../utils/forensicNormalizer";
 interface ResultsDashboardProps {
   results: AnalysisResult[];
   selectedResult: AnalysisResult;
-  onSelectResult: (result: AnalysisResult) => void;
+  isDarkMode?: boolean;
 }
 
 const panelStyle = {
   borderRadius: "16px",
-  border: "1px solid rgba(141, 112, 179, 0.3)",
-  background: "rgba(255, 255, 255, 0.78)",
-  boxShadow: "0 18px 42px rgba(61, 48, 77, 0.14)",
+  border: "1px solid var(--app-panel-border, rgba(141, 112, 179, 0.3))",
+  background: "var(--app-panel-bg, rgba(255, 255, 255, 0.78))",
+  boxShadow: "var(--app-panel-shadow, 0 18px 42px rgba(61, 48, 77, 0.14))",
 };
 
 const mutedPanelStyle = {
   borderRadius: "14px",
-  border: "1px solid rgba(141, 112, 179, 0.24)",
-  background: "rgba(245, 240, 255, 0.58)",
+  border: "1px solid var(--app-muted-panel-border, rgba(141, 112, 179, 0.24))",
+  background: "var(--app-muted-panel-bg, rgba(245, 240, 255, 0.58))",
 };
 
 function formatFileSize(bytes: number) {
@@ -79,6 +79,8 @@ function isAiSpecificEvidenceTest(testName: string) {
     normalized.includes("frequency fingerprint") ||
     normalized.includes("diffusion") ||
     normalized.includes("reconstruction") ||
+    normalized.includes("vlm") ||
+    normalized.includes("visual review") ||
     normalized.includes("semantic")
   );
 }
@@ -182,6 +184,7 @@ function DetailRow({
 
 export function ResultsDashboard({
   selectedResult,
+  isDarkMode = false,
 }: ResultsDashboardProps) {
   const forensicTests = normalizeForensicTests(selectedResult);
   const aiSpecificTests = forensicTests.filter((test) => isAiSpecificEvidenceTest(test.test_name));
@@ -190,9 +193,13 @@ export function ResultsDashboard({
   const modelEvidence = selectedResult.modelEvidence;
   const reliability = selectedResult.reliability;
   const robustness = selectedResult.robustness;
+  const userSummary = selectedResult.userSummary;
   const detectionLabel = selectedResult.isAIGenerated
     ? "AI Generated"
     : "Low AI Signal";
+  const statTextColor = isDarkMode ? "#faf7ff" : "#1f2937";
+  const statMutedColor = isDarkMode ? "#d8cbe8" : "#655080";
+  const statIconColor = isDarkMode ? "#efe8f8" : "#655080";
   const statCards = [
     {
       label: "Detection",
@@ -254,19 +261,19 @@ export function ResultsDashboard({
               <div className="flex items-center justify-between gap-3">
                 <span
                   style={{
-                    color: "#655080",
+                    color: statMutedColor,
                     fontSize: "0.82rem",
                     fontWeight: 700,
                   }}
                 >
                   {item.label}
                 </span>
-                <Icon className="w-5 h-5 text-[#655080]" />
+                <Icon className="w-5 h-5" style={{ color: statIconColor }} />
               </div>
               <div>
                 <p
                   style={{
-                    color: "#1f2937",
+                    color: statTextColor,
                     fontSize: item.value.length > 10 ? "1.2rem" : "1.45rem",
                     fontWeight: 700,
                     lineHeight: 1.1,
@@ -277,7 +284,7 @@ export function ResultsDashboard({
                 </p>
                 <p
                   style={{
-                    color: "#655080",
+                    color: statMutedColor,
                     fontSize: "0.84rem",
                     display: "-webkit-box",
                     WebkitLineClamp: 2,
@@ -292,6 +299,29 @@ export function ResultsDashboard({
           );
         })}
       </div>
+
+      <Card style={{ ...panelStyle, padding: "1rem 1.15rem" }}>
+        <div className="flex items-start gap-3">
+          <ShieldQuestion
+            className="w-5 h-5"
+            style={{ color: statIconColor, flexShrink: 0, marginTop: "0.1rem" }}
+          />
+          <div>
+            <h3
+              className="font-semibold text-gray-900"
+              style={{ color: statTextColor, fontSize: "1rem" }}
+            >
+              What this means
+            </h3>
+            <p
+              className="text-gray-600"
+              style={{ color: statMutedColor, fontSize: "0.92rem", lineHeight: 1.45 }}
+            >
+              This result is an estimate. Model score and forensic checks are supporting signals, not proof.
+            </p>
+          </div>
+        </div>
+      </Card>
 
       <div
         style={{
@@ -646,7 +676,7 @@ export function ResultsDashboard({
                   className="text-gray-600"
                   style={{ fontSize: "0.92rem", lineHeight: 1.45, marginTop: "0.25rem" }}
                 >
-                  Checks for AI provenance, spectral fingerprints, reconstruction patterns, and semantic consistency signals.
+                  Checks for AI provenance plus frequency, reconstruction, visual, and structure signals. These review signals are not standalone proof.
                 </p>
               </div>
             </div>
@@ -726,15 +756,73 @@ export function ResultsDashboard({
         )}
       </Card>
 
-      <Card className="bg-purple-100" style={{ ...panelStyle, padding: "1.25rem" }}>
-        <h3 style={{ fontSize: "1.05rem" }}>Analysis Summary</h3>
-        <p className="text-gray-700" style={{ fontSize: "0.92rem" }}>
-          The overall confidence score of{" "}
-          {selectedResult.confidence.toFixed(1)}% suggests that it is{" "}
-          {selectedResult.isAIGenerated
-            ? "likely AI-generated"
-            : "not strongly flagged as AI-generated"}. Clean forensic checks do not prove camera origin.
-        </p>
+      <Card className="bg-purple-100" style={{ ...panelStyle, padding: "1.25rem", gap: "1rem" }}>
+        <h3 className="text-gray-900" style={{ fontSize: "1.05rem" }}>Plain-Language Summary</h3>
+        {userSummary ? (
+          <>
+            <div
+              style={{
+                ...mutedPanelStyle,
+                padding: "1rem",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                gap: "0.75rem",
+              }}
+            >
+              <div>
+                <p className="text-gray-500" style={{ fontSize: "0.78rem", fontWeight: 700 }}>
+                  Final Verdict
+                </p>
+                <p className="text-gray-900" style={{ fontSize: "1rem", fontWeight: 700 }}>
+                  {userSummary["Final Verdict"]}
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-500" style={{ fontSize: "0.78rem", fontWeight: 700 }}>
+                  Confidence
+                </p>
+                <p className="text-gray-900" style={{ fontSize: "1rem", fontWeight: 700 }}>
+                  {userSummary.Confidence}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <p className="text-gray-500" style={{ fontSize: "0.78rem", fontWeight: 700 }}>
+                  Summary
+                </p>
+                <p className="text-gray-700" style={{ fontSize: "0.92rem" }}>
+                  {userSummary.Summary}
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-500" style={{ fontSize: "0.78rem", fontWeight: 700 }}>
+                  Forensic Insight
+                </p>
+                <p className="text-gray-700" style={{ fontSize: "0.92rem" }}>
+                  {userSummary["Forensic Insight"]}
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-500" style={{ fontSize: "0.78rem", fontWeight: 700 }}>
+                  Recommendation
+                </p>
+                <p className="text-gray-700" style={{ fontSize: "0.92rem" }}>
+                  {userSummary.Recommendation}
+                </p>
+              </div>
+            </div>
+          </>
+        ) : (
+          <p className="text-gray-700" style={{ fontSize: "0.92rem" }}>
+            The overall confidence score of{" "}
+            {selectedResult.confidence.toFixed(1)}% suggests that it is{" "}
+            {selectedResult.isAIGenerated
+              ? "likely AI-generated"
+              : "not strongly flagged as AI-generated"}. Clean forensic checks do not prove camera origin.
+          </p>
+        )}
       </Card>
     </div>
   );

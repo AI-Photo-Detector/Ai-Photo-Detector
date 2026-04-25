@@ -101,6 +101,8 @@ class DetectionMetadata(BaseModel):
     modelEvidence: ModelEvidence | None = None
     robustness: RobustnessCheck | None = None
     reliability: ResultReliability | None = None
+    officialReport: str | None = None
+    userSummary: dict[str, str] | None = None
 
 
 class DetectionResponse(BaseModel):

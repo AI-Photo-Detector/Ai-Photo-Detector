@@ -4,6 +4,14 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - dependency may be absent in minimal installs
+    load_dotenv = None
+
+if load_dotenv is not None:
+    load_dotenv()
+
 from backend.routes import router as api_router
 
 logger = logging.getLogger(__name__)
@@ -17,7 +25,7 @@ app = FastAPI(
     version="0.1.0",
 )
 
-allowed_origins = [
+_DEFAULT_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
@@ -25,6 +33,12 @@ allowed_origins = [
     "http://localhost:4173",
     "http://127.0.0.1:4173",
 ]
+
+allowed_origins = [
+    o.strip()
+    for o in os.getenv("CORS_ORIGINS", "").split(",")
+    if o.strip()
+] or _DEFAULT_ORIGINS
 
 app.add_middleware(
     CORSMiddleware,

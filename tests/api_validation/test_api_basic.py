@@ -1,9 +1,22 @@
-import requests
+"""
+Manual validation script for the BitMind API.
+
+Usage:
+  1. Set the BITMIND_API_KEY environment variable.
+  2. Update IMAGE_PATH below to point at a real image file.
+  3. Run: python -m tests.api_validation.test_api_basic
+"""
+
 import base64
 import mimetypes
+import os
 from pathlib import Path
 
-API_KEY = "bitmind-bf76cb20-02ac-11f1-83b3-6f90b3a830e0:b504b9e4"
+import requests
+
+API_KEY = os.getenv("BITMIND_API_KEY")
+if not API_KEY:
+    raise RuntimeError("Set BITMIND_API_KEY before running this validation script.")
 
 URL = "https://api.bitmind.ai/oracle/v1/34/detect-image"
 
@@ -14,16 +27,14 @@ HEADERS = {
     "Accept": "*/*",
 }
 
-# ----------------------------
-# Local image path ONLY
-# ----------------------------
-# Example:"C:\\Users\\Engineer\\Desktop\\fake-photo\\12.png"
-IMAGE_PATH = Path("Ai-Photo-Detector\tests\images\<YOUR_IMAGE_NAME>")  #<- add the image path in here then run the code
+IMAGE_PATH = Path("tests/images/sample.png")
 
 if not IMAGE_PATH.exists():
-    raise FileNotFoundError(f"Image not found: {IMAGE_PATH}")
+    raise FileNotFoundError(
+        f"Image not found: {IMAGE_PATH}  — update IMAGE_PATH to a real file."
+    )
 
-mime_type, _ = mimetypes.guess_type(IMAGE_PATH)
+mime_type, _ = mimetypes.guess_type(str(IMAGE_PATH))
 if mime_type is None:
     raise ValueError("Unsupported image type. Use jpg, png, webp, etc.")
 
@@ -40,8 +51,11 @@ response = requests.post(
     URL,
     json=payload,
     headers=HEADERS,
-    timeout=60
+    timeout=60,
 )
 
-print("Status:", response.status_code)
-print(response.text)
+assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+data = response.json()
+assert "probability" in data or "confidence" in data or "score" in data, (
+    f"Response missing expected probability field: {data}"
+)

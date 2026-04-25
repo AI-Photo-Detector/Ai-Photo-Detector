@@ -13,6 +13,7 @@ from backend.detector.noise_texture import analyze_noise_texture
 from backend.detector.provenance import analyze_provenance
 from backend.detector.semantic_consistency import analyze_semantic_consistency
 from backend.detector.edge_boundary import analyze_edge_boundary
+from backend.detector.vlm_semantic import analyze_vlm_semantic, should_run_vlm_semantic
 
 
 # Basic magic-byte checks keep preprocessing dependency-free.
@@ -105,6 +106,15 @@ def preprocess_image(
             image_bytes=image_bytes,
             request_id=request_id,
         )
+        vlm_semantic_analysis = (
+            analyze_vlm_semantic(
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                request_id=request_id,
+            )
+            if should_run_vlm_semantic()
+            else None
+        )
         ela_analysis = analyze_ela(image_bytes=image_bytes, request_id=request_id)
         jpeg_artifact_analysis = analyze_jpeg_artifacts(
             image_bytes=image_bytes,
@@ -138,6 +148,8 @@ def preprocess_image(
         model_input["frequency_fingerprint_score"] = frequency_fingerprint_analysis.score
         model_input["diffusion_reconstruction_score"] = diffusion_reconstruction_analysis.score
         model_input["semantic_consistency_score"] = semantic_consistency_analysis.score
+        if vlm_semantic_analysis is not None:
+            model_input["vlm_visual_ai_score"] = vlm_semantic_analysis.score
         metadata["ela"] = {
             "score": ela_analysis.score,
             "explanation": ela_analysis.explanation,
@@ -153,6 +165,7 @@ def preprocess_image(
             frequency_fingerprint_analysis.to_forensic_test(),
             diffusion_reconstruction_analysis.to_forensic_test(),
             semantic_consistency_analysis.to_forensic_test(),
+            *([vlm_semantic_analysis.to_forensic_test()] if vlm_semantic_analysis is not None else []),
             ela_analysis.to_forensic_test(),
             jpeg_artifact_analysis.to_forensic_test(),
             noise_texture_analysis.to_forensic_test(),
