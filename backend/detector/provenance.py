@@ -10,6 +10,13 @@ from typing import Any
 
 from PIL import Image
 
+try:
+    import c2pa
+    from c2pa import C2paError
+except ImportError:  # pragma: no cover - optional provenance dependency
+    c2pa = None
+    C2paError = Exception
+
 
 TEST_NAME = "Provenance / Watermark Analysis"
 MAX_METADATA_VALUE_LENGTH = 360
@@ -217,18 +224,81 @@ def _c2pa_tool_path() -> str | None:
     return shutil.which("c2patool") or shutil.which("c2pa")
 
 
-def _verify_c2pa_with_tool(image_bytes: bytes, mime_type: str) -> dict[str, str | bool]:
+def _empty_c2pa_result(
+    *,
+    status: str,
+    tool_used: str,
+    signature_valid: bool = False,
+    ai_action_present: bool = False,
+    camera_capture_claim_present: bool = False,
+    claim_generator: str = "none",
+    signer: str = "none",
+) -> dict[str, str | bool]:
+    return {
+        "c2pa_verification_status": status,
+        "c2pa_signature_valid": signature_valid,
+        "c2pa_ai_action_present": ai_action_present,
+        "c2pa_camera_capture_claim_present": camera_capture_claim_present,
+        "c2pa_claim_generator": claim_generator,
+        "c2pa_signer": signer,
+        "c2pa_tool_used": tool_used,
+    }
+
+
+def _c2pa_status_from_json(payload: Any) -> str:
+    payload_l = json.dumps(payload, sort_keys=True).lower()
+    invalid_markers = ("invalid", "tamper", "claim.missing", "assertion.missing", "signature.mismatch")
+    valid_markers = ("validation_state", "valid", "trusted", "signingcredential.trusted")
+
+    if any(marker in payload_l for marker in invalid_markers):
+        return "invalid"
+    if any(marker in payload_l for marker in valid_markers):
+        return "valid"
+    return "present"
+
+
+def _verify_c2pa_with_python(image_bytes: bytes, mime_type: str) -> dict[str, str | bool] | None:
+    if c2pa is None:
+        return None
+
+    tool_used = f"c2pa-python {getattr(c2pa, '__version__', 'unknown')}"
+    try:
+        reader = c2pa.Reader.try_create(mime_type, io.BytesIO(image_bytes))
+        if reader is None:
+            return _empty_c2pa_result(status="no_manifest", tool_used=tool_used)
+
+        with reader:
+            payload = json.loads(reader.json())
+            verification_status = _c2pa_status_from_json(payload)
+            json_l = json.dumps(payload, sort_keys=True).lower()
+            ai_action_present = any(marker in json_l for marker in C2PA_AI_ACTION_MARKERS)
+            camera_capture_claim_present = any(marker in json_l for marker in C2PA_CAMERA_CAPTURE_MARKERS)
+            claim_generator = _first_matching_json_value(
+                payload,
+                ("claim_generator", "claimgenerator", "generator", "softwareagent", "software_agent"),
+            )
+            signer = _first_matching_json_value(
+                payload,
+                ("issuer", "signer", "common_name", "commonname", "cert_serial_number"),
+            )
+
+            return _empty_c2pa_result(
+                status=verification_status,
+                tool_used=tool_used,
+                signature_valid=verification_status in {"valid", "present"},
+                ai_action_present=ai_action_present,
+                camera_capture_claim_present=camera_capture_claim_present,
+                claim_generator=claim_generator,
+                signer=signer,
+            )
+    except (C2paError, OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def _verify_c2pa_with_cli(image_bytes: bytes, mime_type: str) -> dict[str, str | bool]:
     tool_path = _c2pa_tool_path()
     if not tool_path:
-        return {
-            "c2pa_verification_status": "unavailable",
-            "c2pa_signature_valid": False,
-            "c2pa_ai_action_present": False,
-            "c2pa_camera_capture_claim_present": False,
-            "c2pa_claim_generator": "none",
-            "c2pa_signer": "none",
-            "c2pa_tool_used": "none",
-        }
+        return _empty_c2pa_result(status="unavailable", tool_used="none")
 
     try:
         timeout_seconds = float(os.getenv("C2PA_TIMEOUT_SECONDS", "10"))
@@ -248,15 +318,7 @@ def _verify_c2pa_with_tool(image_bytes: bytes, mime_type: str) -> dict[str, str 
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        return {
-            "c2pa_verification_status": "error",
-            "c2pa_signature_valid": False,
-            "c2pa_ai_action_present": False,
-            "c2pa_camera_capture_claim_present": False,
-            "c2pa_claim_generator": "none",
-            "c2pa_signer": "none",
-            "c2pa_tool_used": tool_path,
-        }
+        return _empty_c2pa_result(status="error", tool_used=tool_path)
     finally:
         if temp_path:
             try:
@@ -299,6 +361,13 @@ def _verify_c2pa_with_tool(image_bytes: bytes, mime_type: str) -> dict[str, str 
     }
 
 
+def _verify_c2pa_with_tool(image_bytes: bytes, mime_type: str) -> dict[str, str | bool]:
+    python_result = _verify_c2pa_with_python(image_bytes, mime_type)
+    if python_result is not None:
+        return python_result
+    return _verify_c2pa_with_cli(image_bytes, mime_type)
+
+
 def _metadata_summary(metadata: dict[str, str]) -> str:
     if not metadata:
         return "none"
@@ -314,6 +383,11 @@ def _metadata_summary(metadata: dict[str, str]) -> str:
 
 
 def _explanation(verdict: str, indicators: list[str], metadata_field_count: int) -> str:
+    if "invalid or tampered C2PA manifest" in indicators:
+        return (
+            "A C2PA or Content Credentials marker was found, but verification failed. "
+            "The provenance claim is not trusted, so treat this as a review signal rather than proof of AI generation."
+        )
     if verdict == "suspicious":
         return (
             "AI provenance, watermark metadata, or a verified AI-generation claim was found. This is high-confidence evidence when intact."
@@ -346,8 +420,10 @@ def analyze_provenance(*, image_bytes: bytes, mime_type: str, request_id: str) -
     indicators: list[str] = []
     if c2pa_present:
         indicators.append("C2PA or Content Credentials marker")
-    if c2pa_ai_action_present:
+    if c2pa_ai_action_present and c2pa_signature_valid and not c2pa_invalid:
         indicators.append("verified C2PA AI action")
+    elif c2pa_ai_action_present:
+        indicators.append("unverified C2PA AI action")
     if c2pa_camera_capture_claim_present and c2pa_signature_valid:
         indicators.append("valid camera-capture provenance")
     if c2pa_invalid:
@@ -358,14 +434,17 @@ def analyze_provenance(*, image_bytes: bytes, mime_type: str, request_id: str) -
 
     indicators = sorted(set(indicators))[:MAX_INDICATORS]
 
-    if ai_sources or c2pa_ai_action_present or (c2pa_present and generator_metadata_present):
+    trusted_c2pa_ai_action = c2pa_ai_action_present and c2pa_signature_valid and not c2pa_invalid
+    has_untrusted_ai_claim = bool(ai_sources) or c2pa_ai_action_present or (c2pa_present and generator_metadata_present)
+
+    if c2pa_invalid:
+        verdict = "inconclusive"
+        score = 0.64 if has_untrusted_ai_claim else 0.56
+        confidence = 0.66 if has_untrusted_ai_claim else 0.7
+    elif ai_sources or trusted_c2pa_ai_action or (c2pa_present and generator_metadata_present):
         verdict = "suspicious"
         score = 0.98
         confidence = 0.96
-    elif c2pa_invalid:
-        verdict = "inconclusive"
-        score = 0.56
-        confidence = 0.8
     elif c2pa_present or generator_metadata_present:
         verdict = "inconclusive"
         score = 0.42

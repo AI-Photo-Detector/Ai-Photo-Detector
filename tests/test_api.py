@@ -150,6 +150,9 @@ def test_detect_uses_provider_confidence_when_provider_verdict_is_real(client, s
     assert payload["isAIGenerated"] is False
     assert payload["confidence"] == 91.9
     assert payload["indicators"][0]["value"] == 12.0
+    assert payload["metadata"]["userSummary"]["Final Verdict"] == "Real"
+    assert payload["metadata"]["userSummary"]["Confidence"] == "92%"
+    assert "Final Verdict: Real" in payload["metadata"]["officialReport"]
 
 
 def test_detect_ai_provenance_overrides_provider_real_verdict(client, sample_png_bytes, monkeypatch):
@@ -218,6 +221,9 @@ def test_detect_ai_provenance_overrides_provider_real_verdict(client, sample_png
     assert payload["isAIGenerated"] is True
     assert payload["confidence"] == 98.0
     assert payload["forensic_tests"][0]["test_name"] == "Provenance / Watermark Analysis"
+    assert payload["metadata"]["userSummary"]["Final Verdict"] == "AI-generated"
+    assert payload["metadata"]["userSummary"]["Confidence"] == "98%"
+    assert "Final Verdict: AI-generated" in payload["metadata"]["officialReport"]
 
 
 def test_detect_success_returns_forensic_tests(client, sample_png_bytes, monkeypatch):

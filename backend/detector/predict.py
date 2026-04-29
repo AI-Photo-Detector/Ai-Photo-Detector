@@ -6,8 +6,6 @@ from typing import Any
 
 import requests
 
-DEFAULT_BITMIND_API_KEY = "bitmind-bf76cb20-02ac-11f1-83b3-6f90b3a830e0:b504b9e4"
-
 
 class ModelUnavailableError(RuntimeError):
     pass
@@ -54,7 +52,6 @@ def _run_model_inference(model_input: dict[str, float], deterministic_seed: int 
     if force_unavailable or not model_path or not os.path.exists(model_path):
         raise ModelUnavailableError("Model artifact unavailable.")
 
-    # TODO: Replace with real inference engine call.
     return _heuristic_inference(model_input, deterministic_seed)
 
 
@@ -282,7 +279,7 @@ def predict_scores(
     allow_fallback: bool = True,
 ) -> PredictionOutput:
     try:
-        bitmind_api_key = os.getenv("BITMIND_API_KEY", DEFAULT_BITMIND_API_KEY).strip()
+        bitmind_api_key = os.getenv("BITMIND_API_KEY", "").strip()
         if bitmind_api_key:
             raw_scores = _run_bitmind_inference(bitmind_api_key, metadata=metadata)
             model_name = "bitmind_api"

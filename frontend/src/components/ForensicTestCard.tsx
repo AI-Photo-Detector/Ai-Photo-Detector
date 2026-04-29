@@ -65,6 +65,11 @@ function isSemanticConsistencyTest(testName: string) {
   return normalized.includes("semantic");
 }
 
+function isVlmReviewTest(testName: string) {
+  const normalized = testName.toLowerCase();
+  return normalized.includes("vlm") || normalized.includes("visual review");
+}
+
 function getVerdictLabel(testName: string, verdict: string) {
   if (isProvenanceTest(testName)) {
     switch (verdict) {
@@ -80,9 +85,9 @@ function getVerdictLabel(testName: string, verdict: string) {
   if (isFrequencyFingerprintTest(testName)) {
     switch (verdict) {
       case "clean":
-        return "no spectral fingerprint";
+        return "low spectral signal";
       case "suspicious":
-        return "AI spectral pattern";
+        return "spectral signal";
       default:
         return "review spectrum";
     }
@@ -91,22 +96,33 @@ function getVerdictLabel(testName: string, verdict: string) {
   if (isDiffusionReconstructionTest(testName)) {
     switch (verdict) {
       case "clean":
-        return "no reconstruction signal";
+        return "low proxy signal";
       case "suspicious":
-        return "reconstruction signal";
+        return "proxy signal";
       default:
-        return "review reconstruction";
+        return "review proxy";
+    }
+  }
+
+  if (isVlmReviewTest(testName)) {
+    switch (verdict) {
+      case "clean":
+        return "no obvious artifacts";
+      case "suspicious":
+        return "visual artifacts";
+      default:
+        return "review visuals";
     }
   }
 
   if (isSemanticConsistencyTest(testName)) {
     switch (verdict) {
       case "clean":
-        return "no semantic anomaly";
+        return "low structure signal";
       case "suspicious":
-        return "semantic anomaly";
+        return "structure signal";
       default:
-        return "review semantics";
+        return "review structure";
     }
   }
 
@@ -166,14 +182,31 @@ function getVerdictLabel(testName: string, verdict: string) {
 
 function getScoreLabel(testName: string) {
   if (isProvenanceTest(testName)) return "Provenance signal";
-  if (isFrequencyFingerprintTest(testName)) return "Frequency fingerprint";
-  if (isDiffusionReconstructionTest(testName)) return "Reconstruction signal";
-  if (isSemanticConsistencyTest(testName)) return "Semantic signal";
+  if (isFrequencyFingerprintTest(testName)) return "Frequency heuristic";
+  if (isDiffusionReconstructionTest(testName)) return "Reconstruction proxy";
+  if (isVlmReviewTest(testName)) return "VLM artifact signal";
+  if (isSemanticConsistencyTest(testName)) return "Structure heuristic";
   if (isElaTest(testName)) return "ELA signal";
   if (isCopyMoveTest(testName)) return "Clone signal";
   if (isNoiseTextureTest(testName)) return "Noise/texture signal";
   if (isCompressionTest(testName)) return "Compression signal";
   return "Forensic signal";
+}
+
+function getDisplayTestName(testName: string) {
+  if (isVlmReviewTest(testName)) {
+    return "VLM Visual Artifact Review";
+  }
+  if (isFrequencyFingerprintTest(testName)) {
+    return "Frequency Heuristic Check";
+  }
+  if (isDiffusionReconstructionTest(testName)) {
+    return "Reconstruction Proxy Check";
+  }
+  if (isSemanticConsistencyTest(testName)) {
+    return "Structure Heuristic Check";
+  }
+  return testName;
 }
 
 function getIcon(verdict: string) {
@@ -234,6 +267,7 @@ function getArtifactMap(details: DetailRecord) {
 export default function ForensicTestCard({ test }: Props) {
   const details = test.details || {};
   const artifactMap = getArtifactMap(details);
+  const displayTestName = getDisplayTestName(test.test_name);
   const regions = Array.isArray(details.regions) ? details.regions : [];
   const metrics = isDetailRecord(details.metrics) ? details.metrics : null;
 
@@ -250,6 +284,7 @@ export default function ForensicTestCard({ test }: Props) {
         "frequency_fingerprint_score",
         "diffusion_reconstruction_score",
         "semantic_consistency_score",
+        "vlm_visual_score",
         "clone_pairs",
         "indicators",
         "regions",
@@ -308,7 +343,7 @@ export default function ForensicTestCard({ test }: Props) {
               overflow: "hidden",
             }}
           >
-            {test.test_name}
+            {displayTestName}
           </span>
         </div>
 
@@ -332,7 +367,7 @@ export default function ForensicTestCard({ test }: Props) {
         <div>
           <img
             src={artifactMap.url}
-            alt={`${test.test_name} artifact map`}
+            alt={`${displayTestName} artifact map`}
             className="w-full rounded border bg-black"
             style={{
               height: "128px",

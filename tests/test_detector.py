@@ -1,4 +1,5 @@
 import io
+import json
 import math
 
 import numpy as np
@@ -14,6 +15,7 @@ from backend.detector.jpeg_artifacts import analyze_jpeg_artifacts, _verdict_for
 from backend.detector.noise_texture import analyze_noise_texture, _verdict_for_metrics as _noise_verdict_for_metrics
 from backend.detector.provenance import analyze_provenance
 from backend.detector.semantic_consistency import analyze_semantic_consistency
+from backend.detector.vlm_semantic import analyze_vlm_semantic, should_run_vlm_semantic
 from backend.detector.postprocess import _status_for_value, postprocess_prediction
 from backend.detector.predict import ModelUnavailableError, PredictionOutput, predict_scores
 from backend.detector.preprocess import preprocess_image
@@ -56,7 +58,9 @@ class TestPreprocessImage:
         assert result.metadata["mime_type"] == "image/webp"
         assert result.metadata["deterministic"] is True
 
-    def test_includes_inline_ela_heatmap_when_request_id_is_present(self):
+    def test_includes_inline_ela_heatmap_when_request_id_is_present(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("DETECTOR_ENABLE_VLM", raising=False)
         image = Image.new("RGB", (12, 12), color=(180, 190, 200))
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
@@ -75,15 +79,20 @@ class TestPreprocessImage:
         test_names = [test["test_name"] for test in result.metadata["forensic_tests"]]
         assert test_names == [
             "Provenance / Watermark Analysis",
+            "EXIF Metadata Analysis",
             "AI Frequency Fingerprint Analysis",
             "Diffusion Reconstruction Analysis",
             "Semantic Consistency Analysis",
             "Error Level Analysis",
             "Compression Artifact Analysis",
             "Noise Pattern / Texture Consistency Analysis",
+            "Resampling / Scaling Detection",
+            "Edge & Boundary Inconsistency Detection",
             "Copy-Move (Clone) Detection",
         ]
         assert "noise_texture_inconsistency_score" in result.model_input
+        assert "resampling_scaling_score" in result.model_input
+        assert "edge_boundary_inconsistency_score" in result.model_input
         assert "copy_move_clone_score" in result.model_input
         assert "provenance_ai_score" in result.model_input
         assert "frequency_fingerprint_score" in result.model_input
@@ -261,6 +270,38 @@ class TestProvenanceAnalysis:
         assert analysis.metrics["c2pa_signature_valid"] is True
         assert analysis.metrics["c2pa_ai_action_present"] is True
         assert "verified C2PA AI action" in analysis.indicators
+
+    def test_invalid_c2pa_ai_claim_reduces_confidence(self, monkeypatch):
+        monkeypatch.setattr(
+            "backend.detector.provenance._verify_c2pa_with_tool",
+            lambda image_bytes, mime_type: {
+                "c2pa_verification_status": "invalid",
+                "c2pa_signature_valid": False,
+                "c2pa_ai_action_present": True,
+                "c2pa_camera_capture_claim_present": False,
+                "c2pa_claim_generator": "OpenAI",
+                "c2pa_signer": "OpenAI",
+                "c2pa_tool_used": "c2patool",
+            },
+        )
+
+        analysis = analyze_provenance(
+            image_bytes=self._png_bytes_with_metadata(
+                {
+                    "Content Credentials": "OpenAI generated image",
+                    "prompt": "a dramatic mountain at sunset",
+                }
+            ),
+            mime_type="image/png",
+            request_id="provenance-c2pa-invalid",
+        )
+
+        assert analysis.verdict == "inconclusive"
+        assert analysis.score < 0.7
+        assert analysis.confidence < 0.9
+        assert "invalid or tampered C2PA manifest" in analysis.indicators
+        assert "unverified C2PA AI action" in analysis.indicators
+        assert "verified C2PA AI action" not in analysis.indicators
 
 
 class TestAISpecificEvidenceAnalysis:
@@ -655,6 +696,143 @@ class TestCopyMoveAnalysis:
         )
 
         assert verdict == "clean"
+
+
+class TestVlmSemanticAnalysis:
+    @staticmethod
+    def _png_bytes() -> bytes:
+        image = Image.new("RGB", (32, 32), color=(120, 130, 140))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    def test_vlm_disabled_without_key_or_flag(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("DETECTOR_ENABLE_VLM", raising=False)
+
+        assert should_run_vlm_semantic() is False
+
+    def test_vlm_stays_disabled_with_key_until_flag_is_on(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.delenv("DETECTOR_ENABLE_VLM", raising=False)
+
+        assert should_run_vlm_semantic() is False
+
+    def test_vlm_enabled_with_explicit_flag(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setenv("DETECTOR_ENABLE_VLM", "1")
+
+        assert should_run_vlm_semantic() is True
+
+    def test_openai_vlm_response_maps_to_suspicious(self, monkeypatch):
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "output_text": json.dumps(
+                        {
+                            "ai_likelihood": 82,
+                            "confidence": 76,
+                            "visible_artifact_count": 3,
+                            "text_anomaly_present": True,
+                            "anatomy_anomaly_present": False,
+                            "reflection_or_shadow_anomaly_present": True,
+                            "geometry_or_perspective_anomaly_present": False,
+                            "notable_observations": [
+                                "Readable text appears malformed.",
+                                "Reflections do not match nearby objects.",
+                            ],
+                            "reasoning_summary": "The image has visible text and reflection anomalies worth reviewing.",
+                        }
+                    )
+                }
+
+        captured: dict[str, object] = {}
+
+        def fake_post(url, *, json=None, headers=None, timeout=None):
+            captured["url"] = url
+            captured["payload"] = json
+            captured["headers"] = headers
+            captured["timeout"] = timeout
+            return Response()
+
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_VLM_MODEL", "gpt-test-vision")
+        monkeypatch.setattr("backend.detector.vlm_semantic.requests.post", fake_post)
+
+        analysis = analyze_vlm_semantic(
+            image_bytes=self._png_bytes(),
+            mime_type="image/png",
+            request_id="vlm-review",
+        )
+
+        assert analysis.verdict == "suspicious"
+        assert analysis.score == pytest.approx(0.82)
+        assert analysis.confidence == pytest.approx(0.76)
+        assert analysis.metrics["vlm_model_available"] is True
+        assert analysis.metrics["vlm_model"] == "gpt-test-vision"
+        assert analysis.metrics["text_anomaly_present"] is True
+        assert len(analysis.observations) == 2
+        assert captured["url"] == "https://api.openai.com/v1/responses"
+        assert captured["headers"]["Authorization"] == "Bearer test-key"
+        payload = captured["payload"]
+        assert payload["text"]["format"]["type"] == "json_schema"
+        assert payload["input"][0]["content"][1]["type"] == "input_image"
+        assert payload["input"][0]["content"][1]["image_url"].startswith("data:image/png;base64,")
+
+    def test_low_confidence_without_visual_artifacts_stays_clean(self, monkeypatch):
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "output_text": json.dumps(
+                        {
+                            "ai_likelihood": 10,
+                            "confidence": 30,
+                            "visible_artifact_count": 0,
+                            "text_anomaly_present": False,
+                            "anatomy_anomaly_present": False,
+                            "reflection_or_shadow_anomaly_present": False,
+                            "geometry_or_perspective_anomaly_present": False,
+                            "notable_observations": [
+                                "No obvious visual artifacts were detected.",
+                            ],
+                            "reasoning_summary": "No concrete visible artifacts were found.",
+                        }
+                    )
+                }
+
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setattr("backend.detector.vlm_semantic.requests.post", lambda *args, **kwargs: Response())
+
+        analysis = analyze_vlm_semantic(
+            image_bytes=self._png_bytes(),
+            mime_type="image/png",
+            request_id="vlm-low-confidence-clean",
+        )
+
+        assert analysis.verdict == "clean"
+        assert analysis.score == pytest.approx(0.1)
+        assert analysis.confidence == pytest.approx(0.3)
+        assert "weak review signal" in analysis.explanation
+
+    def test_missing_key_returns_unavailable_review(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        analysis = analyze_vlm_semantic(
+            image_bytes=self._png_bytes(),
+            mime_type="image/png",
+            request_id="vlm-missing-key",
+        )
+
+        assert analysis.verdict == "inconclusive"
+        assert analysis.score == 0.0
+        assert analysis.confidence == 0.0
+        assert analysis.metrics["vlm_model_available"] is False
 
 
 class TestPredictScores:

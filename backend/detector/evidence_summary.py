@@ -440,11 +440,13 @@ def extract_suspicious_tests(forensic_tests: list[dict[str, Any]]) -> list[str]:
             suspicious_tests.append(test.get("test_name", "unknown"))
 
     return suspicious_tests
-    
 
 def generate_final_report(
     prediction: PredictionOutput,
     forensic_tests: list[dict[str, Any]],
+    *,
+    final_is_ai: bool | None = None,
+    final_confidence: float | None = None,
 ) -> dict[str, Any]:
     """
     Combine API result and forensic analysis into a final structured report.
@@ -482,6 +484,13 @@ def generate_final_report(
 
     final_score = round((api_score * 0.65) + (forensic_score * 0.35), 3)
     final_verdict = "AI-generated" if final_score >= 0.5 else "Real"
+
+    if final_is_ai is not None and final_confidence is not None:
+        verdict_confidence = _clamp(float(final_confidence), 0.0, 100.0)
+        final_score = round((verdict_confidence if final_is_ai else 100.0 - verdict_confidence) / 100.0, 3)
+        final_verdict = "AI-generated" if final_is_ai else "Real"
+        api_result["verdict"] = final_verdict
+        api_result["confidence"] = round(verdict_confidence, 2)
 
     explanation = build_explanation(api_result, forensic_summary)
 

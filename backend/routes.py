@@ -11,10 +11,13 @@ from backend.detector.evidence_summary import (
     analyze_model_robustness,
     assess_result_reliability,
     build_model_evidence,
+    generate_final_report,
+    generate_user_summary,
 )
 from backend.detector.postprocess import postprocess_prediction
 from backend.detector.predict import ModelUnavailableError, predict_scores
 from backend.detector.preprocess import preprocess_image
+from backend.detector.report_builder import generate_official_analysis_report
 from backend.schemas import (
     ACCEPTED_IMAGE_MIME_TYPES,
     ELAHeatmap,
@@ -205,6 +208,14 @@ async def detect_image(file: UploadFile | None = File(default=None)):
             forensic_tests=forensic_tests,
             robustness=robustness,
         )
+        report = generate_final_report(
+            prediction,
+            forensic_tests,
+            final_is_ai=final_is_ai,
+            final_confidence=response_confidence,
+        )
+        official_report = generate_official_analysis_report(file.filename or "uploaded-image", report)
+        user_summary = generate_user_summary(report)
 
         ela_metadata = None
         ela_payload = preprocess_result.metadata.get("ela", {})
@@ -235,6 +246,8 @@ async def detect_image(file: UploadFile | None = File(default=None)):
                 modelEvidence=model_evidence,
                 robustness=robustness,
                 reliability=reliability,
+                officialReport=official_report,
+                userSummary=user_summary,
             ),
         )
 

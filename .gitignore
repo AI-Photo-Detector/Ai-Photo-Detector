@@ -10,12 +10,18 @@ venv/
 .DS_Store
 Thumbs.db
 .vscode/
+.vs/
 .idea/
 
 # Frontend
 frontend/node_modules/
+frontend/.vite/
 frontend/dist/
 frontend/build/
+
+# Test output
+coverage/
+htmlcov/
 
 # Model weights
 model/weights/
